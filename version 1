@@ -1,0 +1,134 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <Adafruit_NeoPixel.h>
+
+#define LED_PIN    13   // GPIO pin for the LED strip data
+#define LED_COUNT  14   // Total number of LEDs in the strip
+#define PIR_PIN    25   // GPIO pin for PIR motion sensor
+
+// Define GPIO pins for each push button
+const int buttonPins[LED_COUNT] = {4, 5, 12, 16, 17, 18, 19, 23, 15, 35, 33, 26, 27, 14};
+
+// Define the number of notes and their durations
+#define NUM_NOTES 8 // Total number of notes in "Happy Birthday"
+
+// Note to LED mapping
+const int noteToLED[NUM_NOTES] = {0, 1, 3, 5, 4, 5, 8, 7};
+const int noteDurations[NUM_NOTES] = {400, 400, 800, 400, 400, 400, 400, 800};
+
+// Initialize LCD and LED strip
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+
+void setup() {
+  // Initialize the LCD
+  lcd.init();
+  lcd.backlight();
+
+  // Initialize the LED strip
+  strip.begin();
+  strip.show(); // Initialize all pixels to 'off'
+
+  // Initialize PIR sensor
+  pinMode(PIR_PIN, INPUT);
+
+  // Initialize all button pins as inputs with pull-down resistors
+  for (int i = 0; i < LED_COUNT; i++) {
+    pinMode(buttonPins[i], INPUT_PULLDOWN);
+  }
+
+  // Display starting message
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("System Initialized");
+  lcd.setCursor(0, 1);
+  lcd.print("Move to Start");
+  delay(2000); // Display message for 2 seconds
+}
+
+void loop() {
+  // Check PIR motion sensor
+  if (digitalRead(PIR_PIN) == HIGH) { // Motion detected
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Press Btn To Start");
+    lcd.setCursor(0, 1);
+    lcd.print("Song Sequence");
+    
+    // Wait for any button press to start the song sequence
+    while (true) {
+      bool startSong = false;
+      for (int i = 0; i < LED_COUNT; i++) {
+        if (digitalRead(buttonPins[i]) == HIGH) {
+          startSong = true;
+          break;
+        }
+      }
+      if (startSong) break;
+      delay(100); // Small delay to prevent rapid loop execution
+    }
+    
+    // Play the song
+    playHappyBirthday();
+    
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Song Finished");
+    delay(2000); // Display message for 2 seconds
+
+    // Display prompt to move again
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Move to Start");
+    delay(2000); // Display message for 2 seconds
+  }
+}
+
+// Function to play "Happy Birthday" song
+void playHappyBirthday() {
+  for (int i = 0; i < NUM_NOTES; i++) {
+    int ledIndex = noteToLED[i];
+    int duration = noteDurations[i];
+    
+    // Light up the current LED
+    strip.setPixelColor(ledIndex, strip.Color(255, 0, 0)); // Set LED to red
+    strip.show();
+    
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Press Btn ");
+    lcd.print(ledIndex + 1); // Show which button to press
+    lcd.setCursor(0, 1);
+    lcd.print("for Note ");
+    lcd.print(i + 1);
+    
+    // Wait until the corresponding button is pressed
+    bool correctButtonPressed = false;
+    bool incorrectMessageDisplayed = false;
+    
+    while (!correctButtonPressed) {
+      if (digitalRead(buttonPins[ledIndex]) == HIGH) {
+        correctButtonPressed = true;
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Correct!");
+        delay(1000); // Display message for 1 second
+      } else if (!incorrectMessageDisplayed) {
+        //lcd.clear();
+        //lcd.setCursor(0, 0);
+        //lcd.print("Incorrect, ");
+       // lcd.setCursor(0, 1);
+        //lcd.print("Press Correct");
+        incorrectMessageDisplayed = true; // Ensure the message is shown only once
+      }
+      delay(100); // Small delay to prevent rapid loop execution
+    }
+
+    // Turn off the LED after button press
+    strip.setPixelColor(ledIndex, strip.Color(0, 0, 0)); // Turn off LED
+    strip.show();
+    
+    // Add a short delay before the next note
+    delay(200); // Adjust delay as needed
+  }
+}
