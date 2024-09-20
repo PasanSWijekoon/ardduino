@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <vector>  // For dynamic arrays
 
 #define LED_PIN    13   // GPIO pin for the LED strip data
 #define LED_COUNT  14   // Total number of LEDs in the strip
@@ -13,24 +14,35 @@
 const int buttonPins[LED_COUNT] = {4, 5, 12, 16, 17, 18, 19, 23, 35, 33, 26, 14, 27};
 
 // Variables for the song data
-int noteToLED[13];      // Store the notes from server
-int noteDurations[13];  // Store the note durations from server
+std::vector<int> noteToLED;      // Store the notes from server dynamically
+std::vector<int> noteDurations;  // Store the note durations from server dynamically
 String songName;
 String mode;
-int numNotes = 13;      // Number of notes
+int numNotes = 0;  // Number of notes will be dynamically set
 
 int correctPresses = 0; // Track correct presses
 int totalPresses = 0;   // Total required presses
 
 // Wi-Fi credentials
+// Wi-Fi credentials
 const char* ssid = "Wokwi-GUEST";
 const char* password = "";
-const char* serverUrl = "https://mypiono.sysoftgroups.com/song.php"; // Replace with your PHP URL
+const char* serverUrl = "https://mypiono.sysoftgroups.com/save_performance.php"; // Replace with your PHP URL
 
 
 // Initialize LCD and LED strip
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+
+// Function to display the selected song name and mode to the user
+void promptUser() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Song: " + songName);
+  lcd.setCursor(0, 1);
+  lcd.print("Mode: " + mode);
+  delay(2000);  // Wait for user to read the message
+}
 
 void setup() {
   Serial.begin(115200);   // Initialize serial communication
@@ -41,7 +53,7 @@ void setup() {
 
   connectToWiFi();        // Connect to Wi-Fi
   fetchSongData();        // Fetch song data from the server
-  promptUser();           // Show the song name and mode on the LCD
+  promptUser();            // Show the song name and mode on the LCD
   delay(2000);            // Pause for user to read the message
 
   // Initialize PIR sensor
@@ -129,7 +141,7 @@ void connectToWiFi() {
 void fetchSongData() {
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
-    http.begin(serverUrl);
+    http.begin("https://mypiono.sysoftgroups.com/song.php");  // Replace with your server URL
     int httpResponseCode = http.GET();
 
     if (httpResponseCode > 0) {
@@ -138,7 +150,7 @@ void fetchSongData() {
       Serial.println(response);
 
       // Parse the JSON response
-      StaticJsonDocument<512> doc;
+      StaticJsonDocument<1024> doc;  // Increased buffer size to accommodate larger JSON
       DeserializationError error = deserializeJson(doc, response);
 
       if (!error) {
@@ -148,16 +160,23 @@ void fetchSongData() {
         JsonArray notes = doc["notes"];
         JsonArray durations = doc["durations"];
 
-        numNotes = notes.size();  // Get the number of notes
+        numNotes = notes.size();  // Get the number of notes dynamically
 
-        // Copy the notes and durations into the respective arrays
+        // Clear the vectors to avoid any previous data
+        noteToLED.clear();
+        noteDurations.clear();
+
+        // Copy the notes and durations into the vectors
         for (int i = 0; i < numNotes; i++) {
-          noteToLED[i] = notes[i];
-          noteDurations[i] = durations[i];
+          noteToLED.push_back(notes[i]);
+          noteDurations.push_back(durations[i]);
         }
 
         Serial.println("Song Name: " + songName);
         Serial.println("Mode: " + mode);
+        Serial.print("Number of Notes: ");
+        Serial.println(numNotes);
+
       } else {
         Serial.println("Error parsing JSON");
         lcd.clear();
@@ -181,14 +200,55 @@ void fetchSongData() {
   }
 }
 
-// Function to display the selected song name and mode to the user
-void promptUser() {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Song: " + songName);
-  lcd.setCursor(0, 1);
-  lcd.print("Mode: " + mode);
-  delay(2000);  // Wait for user to read the message
+// Function to send performance data to the server
+void sendPerformanceToServer(String songName, String mode, float score) {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    http.begin(serverUrl);  // Replace with your server URL
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+    // Prepare the data to send
+    String postData = "song_name=" + songName + "&mode=" + mode + "&score=" + String(score);
+
+    // Send HTTP POST request
+    int httpResponseCode = http.POST(postData);
+
+    // Check the response code
+    if (httpResponseCode > 0) {
+      String response = http.getString();  // Get the response to check if it's successful
+      Serial.println(httpResponseCode);
+      Serial.println(response);
+    } else {
+      Serial.print("Error on sending POST: ");
+      Serial.println(httpResponseCode);
+    }
+    http.end();  // Close connection
+  } else {
+    Serial.println("WiFi Disconnected");
+  }
+}
+
+// Function to print performance and send it to the server
+void printPerformanceOverview() {
+  float scorePercentage = (float(correctPresses) / float(totalPresses)) * 100.0;
+  
+  // Print the performance overview
+  Serial.println("Performance Overview:");
+  Serial.println("---------------------");
+  Serial.print("Song: ");
+  Serial.println(songName);
+  Serial.print("Mode: ");
+  Serial.println(mode);
+  Serial.print("Score: ");
+  Serial.print(correctPresses);
+  Serial.print("/");
+  Serial.print(totalPresses);
+  Serial.print(" (");
+  Serial.print(scorePercentage);
+  Serial.println("%)");
+
+  // Send performance to server
+  sendPerformanceToServer(songName, mode, scorePercentage);
 }
 
 // Function to play the song in Tutorial Mode
@@ -275,24 +335,4 @@ void playPlayMode() {
 
     delay(200); // Add a short delay before the next note
   }
-}
-
-// Function to calculate and print performance overview
-void printPerformanceOverview() {
-  float scorePercentage = (float(correctPresses) / float(totalPresses)) * 100.0;
-  
-  // Print the performance overview
-  Serial.println("Performance Overview:");
-  Serial.println("---------------------");
-  Serial.print("Song: ");
-  Serial.println(songName);
-  Serial.print("Mode: ");
-  Serial.println(mode);
-  Serial.print("Score: ");
-  Serial.print(correctPresses);
-  Serial.print("/");
-  Serial.print(totalPresses);
-  Serial.print(" (");
-  Serial.print(scorePercentage);
-  Serial.println("%)");
 }
